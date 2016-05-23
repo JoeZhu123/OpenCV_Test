@@ -1,0 +1,238 @@
+#include <opencv2/opencv.hpp>
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/calib3d/calib3d.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <string> 
+#include <iostream>
+#include <stdio.h>
+#include <sstream>
+#include <cv.h>
+#include <cxcore.h>
+#include <cvaux.h>
+#include <highgui.h>
+#include <stdlib.h>
+#include <time.h>
+
+//#define DATA_CENTER  //用来选择到底是编译运动物体的图像坐标数据，还是用来做相机矫正
+
+using namespace cv;
+using namespace std;
+RNG rng(12345);
+
+
+int main(int argc,char **argv)
+{
+	
+	/*
+
+	
+	Mat image = imread("1.png");
+	namedWindow("dt_test");
+	imshow("dt_test", image);
+	cvtColor(image,image,CV_BGR2GRAY);
+	threshold(image, image, 20, 255.0, CV_THRESH_BINARY);
+
+	//定义点和向量
+	vector<vector<Point> > contours;
+
+	findContours(image,contours,RETR_EXTERNAL,CHAIN_APPROX_NONE);
+	Mat result(image.size(),CV_8U,Scalar(0));
+	drawContours(result, contours, -1, Scalar(255), 2);
+	*/
+	/*
+	Mat image(200,200,CV_8UC3,Scalar(0));
+	RotatedRect rRect = RotatedRect(Point2f(100,100),Size2f(100,50),30);
+	Point2f vertices[4];
+	rRect.points(vertices);
+	//利用line命令连接四个点画了一个矩形
+	for (int i = 0; i < 4; i++)
+	{
+		line(image,vertices[i],vertices[(i+1)%4],Scalar(0,255,0));
+	}
+	Rect brect = rRect.boundingRect();
+	rectangle(image,brect,Scalar(255,0,0));
+	imshow("rectangles",image);
+	cout << "rRect.center.x: " << rRect.center.x << endl;
+	cout << "rRect.center.y: " << rRect.center.y << endl;
+	cout << "rRect.center.angle: " << rRect.angle << endl;
+	waitKey(0);
+	*/
+	//RotatedRect rect_temp;
+	//Rect br;
+	//br = rect_temp.boundingRect();
+	//		Point pt1, pt2;
+	//		pt1.x = br.x;
+	//		pt1.y = br.y;
+	//		pt2.x = br.x + br.width;
+	//		pt2.y = br.y + br.height;
+	/*
+	rectangle(result, br, Scalar(0), 3, 8, 0);
+
+	namedWindow("contours_test");
+	imshow("contours_test",result);
+	waitKey();
+	*/
+	VideoCapture capture;
+	capture.open(0);
+	 // BackgroundSubtractorMOG bgSubtractor(20, 10, 0.5 , false);
+	BackgroundSubtractorMOG2 bgSubtractor2(20, 16, false);
+
+	int nFrmNum = 0;
+	bool stop = false;
+	Mat frame;
+	Mat fore_frame;
+	Mat back_frame;
+	vector<vector<Point>> contours;
+	vector<Vec4i> hierarchy;
+	//	Mat back_ground;
+
+	cvNamedWindow("NCU-video", CV_WINDOW_AUTOSIZE);
+	cvNamedWindow("NCU-backframe", CV_WINDOW_AUTOSIZE);
+	cvNamedWindow("NCU-foreframe", CV_WINDOW_AUTOSIZE);
+	cvNamedWindow("NCU-contours-drawing", CV_WINDOW_AUTOSIZE);
+	//cvNamedWindow("NCU-back_ground", CV_WINDOW_AUTOSIZE);
+
+	//排列窗口
+	//	cvMoveWindow("NCU-video",30,0);
+	//	cvMoveWindow("NCU-backframe",300,0);
+	//	cvMoveWindow("NCU-foreframe",600,0);
+	//	cvMoveWindow("NCU-foreframe", 900, 0);
+
+	//设置摄像头获取的图像大小为340x240   
+	capture.set(CV_CAP_PROP_FRAME_WIDTH, 340);
+	capture.set(CV_CAP_PROP_FRAME_HEIGHT, 240);
+	if (!capture.isOpened())
+	{
+		cout << "capture device failed to open!" << endl;
+		return 1;
+	}
+
+	//逐帧读取视频
+	while (!stop)
+	{
+		capture >> frame;
+
+
+		++nFrmNum;
+		//			cout << nFrmNum << endl;
+
+		//运动前景检测，并更新背景
+		//  bgSubtractor(frame,back_frame,0.01);
+		bgSubtractor2(frame, back_frame, 0.01);
+
+		threshold(back_frame, back_frame, 128, 255, THRESH_BINARY_INV);
+		//进行形态学滤波，去掉噪音
+		erode(back_frame, fore_frame, Mat());//腐蚀
+		dilate(fore_frame, fore_frame, Mat());//膨胀
+		//detect edges using canny
+		Canny(fore_frame,fore_frame,80,255,3);
+
+		findContours(fore_frame,contours,hierarchy,CV_RETR_TREE,CV_CHAIN_APPROX_SIMPLE,Point(0,0));
+		//findContours(fore_frame, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE, Point(0, 0));	
+		//找出面积最大的轮廓
+		//iterate through all the top-level contours
+		//draw each connected component with random color
+		double whRatio_max = 3.0;//3//2.0
+		double whRatio_min = 1.5;
+		int idx = 0, largestComp = 0;
+		double dAreaMax = 280.0;//280//200
+		double dAreaMin = 50.0;//50//60		
+		for (idx = 0; idx < contours.size() ; idx++)
+		{
+			double dConArea = fabs(contourArea(contours[idx]));
+			if (dConArea > dAreaMax)
+			{
+				contours.erase(contours.begin() + idx);
+				continue;
+			}
+			if (dConArea < dAreaMin)
+			{
+				contours.erase(contours.begin() + idx);
+				continue;
+			}			
+    		Rect aRect = boundingRect(contours[idx]);
+		  	if (((aRect.width / aRect.height) > whRatio_max) || ((aRect.width / aRect.height) < whRatio_min))
+		  	{
+				contours.erase(contours.begin() + idx);
+				continue;
+     		}
+		}
+
+		////////////////////////////////////////////////////////////
+		///////////////////////////////////////////////////////////
+		//除去太长或者太短的轮廓(注：只是一个非常简单的滤除干扰)  
+		
+		int cmin = 20;
+		int cmax = 100;
+		vector<vector<Point>>::const_iterator  itc = contours.begin();
+		while (itc != contours.end())
+		{
+			if (itc->size() < cmin || itc->size() > cmax)
+				itc = contours.erase(itc);
+			else
+				++itc;
+		}
+		
+		////////////////////////////////////////////////////////////
+		vector<RotatedRect> minRect(contours.size());
+		for (int i = 0; i < contours.size(); i++)
+		{
+			minRect[i] = minAreaRect(Mat(contours[i]));
+			//if (((minRect[i].size.width / minRect[i].size.height) > whRatio_max) && ((minRect[i].size.width / minRect[i].size.height) < whRatio_min))
+			//	{
+			//		contours.erase(contours.begin() + i);
+			//		continue;
+			//	}
+		}
+		Mat drawing = Mat::zeros(fore_frame.size(), CV_8UC3);
+		for (int i = 0; i < contours.size(); i++)
+		{
+			Scalar color = Scalar(rng.uniform(0, 255), rng.uniform(0, 255), rng.uniform(0, 255));
+			drawContours(drawing, contours, i, color, 1, 8, vector<Vec4i>(), 0, Point());
+			Point2f rect_points[4];
+			minRect[i].points(rect_points);
+			for (int j = 0; j < 4; j++)
+			{
+				line(drawing, rect_points[j], rect_points[(j + 1) % 4], color, 1, 8);
+			}
+		}
+
+		////////////////////////////////////////////////////////////////////////////////
+		//vector<Point> poly;
+		//参数为：输入图像的2维点集，输出结果，估计精度，是否闭合
+		//approxPolyDP(Mat(contours[2]), poly, 5, true);
+
+
+
+
+
+		////////////////////////////////////////////////////////////////////////////////
+		//bgSubtractor2.getBackgroundImage(back_ground);			
+
+		//show Image
+		if (!frame.empty())
+		{
+			imshow("NCU-video", frame);
+			imshow("NCU-backframe", back_frame);
+			imshow("NCU-foreframe", fore_frame);
+			imshow("NCU-contours-drawing",drawing);
+		}
+
+		//			if (!back_ground.empty())
+		//				imshow("NCU-background", back_ground);
+
+		if (cvWaitKey(12) == 'q')
+			break;
+
+	}
+	//销毁窗口
+	cvDestroyWindow("NCU-video");
+	//cvDestroyWindow("NCU-background");
+	cvDestroyWindow("NCU-foreframe");
+	cvDestroyWindow("NCU-backframe");
+	cvDestroyWindow("NCU-contours-drawing");
+	capture.release();
+	return 0;
+}
